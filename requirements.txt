@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+""
+DNS Validator Pro (Enhanced)
+- Supports DNS over HTTPS (DoH)
+- Reliability testing (5 attempts per server)
+- Export results to JSON/CSV
+-DoH-only mode
+""
+
+import dns. resolver
+import dns. message
+import dns.query
+import json
+import csv
+import time
+import argparse
+import sys
+from concurrent. futures import ThreadPoolExecutor, as_completed
+
+# List of regular DNS servers
+DEFAULT_DNS_SERVERS = [ 
+"1.1.1.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "208.67.222.222",
+"208.67.220.220", "77.88.8.8", "77.88.8.1", "1.0.0.1"
+
+# List of DoH (DNS over HTTPS) Servers
+DEFAULT_DOH_SERVERS = [
+"https://cloudflare-dns.com/dns-query",
+
+"https://dns.google/dns-query",
+
+"https://dns.quad9.net/dns-query",
+
+"https://mozilla.cloudflare-dns.com/dns-query"
+
+def test_dns_server(server, test_domain="google.com", timeout=3, attempts=3):
+
+"Test a standard DNS server (UDP). Returns (success rate, average time)"
+
+resolver = dns.resolver.Resolver() 
+
+resolver.nameservers = [server] 
+resolver. timeout = timeout 
+resolver.lifetime = timeout 
+success = 0 
+total_time = 0 
+for_in range(attempts): 
+try: 
+start = time.time() 
+resolver.resolve(test_domain, 'A') 
+elapsed = (time.time() - start) * 1000 
+total_time += elapsed 
+success += 1 
+except Exception: 
+pass. pass 
+success_rate = (success / attempts) * 100 
+avg_time = total_time / success if success > 0 else float('inf') 
+return (server, success_rate, avg_time)
+
+def test_doh_server(url, test_domain="google.com", timeout=3, attempts=3): 
+“DoH server test. returns (success rate, average time)” 
+success = 0 
+total_time = 0 
+for_in range(attempts): 
+try: 
+request = dns.message.make_query(test_domain, 'A') 
+start = time.time() 
+response = dns.query.https(url, request, timeout=timeout) 
+if len(response. answer) > 0: 
+elapsed = (time.time() - start) * 1000 
+total_time += elapsed 
+success += 1 
+except Exception: 
+pass. pass 
+success_rate = (success / attempts) * 100 
+avg_time = total_time / success if success > 0 else float('inf') 
+return (url, success_rate, avg_time)
+
+def export_results(results, filename, format='json'): 
+“Export results to JSON or CSV file” 
+if format == 'json': 
+with open(filename, 'w') as f: 
+json.dump(results, f, indent=4) 
+elif format == 'csv': 
+with open(filename, 'w', newline='') as f: 
+writer = csv.writer(f) 
+writer.writerow(['Server', 'Success Rate (%)', 'Avg Response Time (ms)']) 
+for r in results: 
+writer.writerow([r[0], r[1], r[2] if r[2] != float('inf') else 'N/A']) 
+print(f"[✓] Results exported to {filename}")
+
+def main(): 
+parser = argparse.ArgumentParser(description="DNS Validator Pro - Find the fastest and most reliable DNS server.") 
+parser.add_argument("--servers", nargs="+", help="List of custom DNS servers (IPs)") 
+parser.add_argument("--doh", action="store_true", help="Include DNS over HTTPS (DoH) servers in test") 
+parser.add_argument("--doh-only", action="store_true", help="Test only DoH servers (ignores --servers and default UDP servers)") 
+parser.add_argument("--domain", default="google.com", help="Domain to test resolution (default: google.com)") 
+parser.add_argument("--timeout", type=int, default=3, help="Timeout per attempt (default: 3 seconds)") 
+parser.add_argument("--attempts", type=int, default=3, help="Number of attempts per server (default: 3)") 
+parser.add_argument("--workers", type=int, default=10, help="Concurrent workers (default: 10)") 
+parser.add_argument("--export", help="Export results to file (specify filename). Format determined by extension (.json or .csv)") 
+args = parser.parse_args() 
+
+# Define a list of servers 
+servers_to_test = [] 
+if args.doh_only: 
+servers_to_test = DEFAULT_DOH_SERVERS 
+else: 
+if args.servers: 
+servers_to_test = args.servers 
+else: 
+servers_to_test = DEFAULT_DNS_SERVERS 
+if args.doh: 
+servers_to_test += DEFAULT_DOH_SERVERS 
+
+print(f"[+] Testing {len(servers_to_test)} endpoints against '{args.domain}'") 
+print(f" Timeout: {args.timeout}s | Attempts per server: {args.attempts}\n") 
+
+results = [] 
+with ThreadPoolExecutor(max_workers=args.workers) as executor: 
+futures = [] 
+for s in servers_to_test: 
+if s.startswith("https://"): 
+# DoH server 
+futures.append(executor.submit(test_doh_server, s, args.domain, args.timeout, args.attempts)) 
+else: 
+# Regular DNS 
+futures.append(executor.submit(test_dns_server, s, args.domain, args.timeout, args.attempts)) 
+
+for future in as_completed(futures): 
+name, success_rate, avg_time = future.result()
